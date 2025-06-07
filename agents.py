@@ -2,6 +2,7 @@ from environments import *
 import random
 from plotter import *
 from collections import deque
+import copy
 
 
 class Event:
@@ -35,7 +36,7 @@ class RLagent:
         """
         Setting up the agent. The Q-table will be a dictinoary mapping states to dictionaries, where each dict maps
         actions to their corresponding Q-values
-        :kwargs replay_type: "random", "forward", "backward", "prioritized" or "trajectory"
+        :kwargs replay_type: "random", "forward", "backward", "prioritized" or "trajectory", "bidirectional"
                 max_replay: the maximum number of replay steps, None meaning no limit
                 replay_threshold: the minimum change in Q-values that will still elicit a replay event. A float value
                     between 0 and infinity (None). If max_replay is infinite, this value has to be finite.
@@ -71,7 +72,6 @@ class RLagent:
         self._current_state = arrival_state
         if self._plotter is not None:
             self._plotter.update_agent_pos(self._current_state)
-        return
 
     def __Q_max__(self, state: int, possible_actions=None) -> dict:
         """
@@ -111,7 +111,6 @@ class RLagent:
             for event in self._memory_buffer:
                 if event.state == state and event.action == action:
                     event.priority = max(event.priority, abs(priority))
-                    return
 
         # 2) Otherwise, if it is not in the buffer, let's add it to the front
         event = Event(state=state, action=action, reward=reward, arrival_state=arrival_state, priority=abs(priority))
@@ -131,11 +130,13 @@ class RLagent:
             self._plotter.clear()
 
         # 1) Prepare the buffer that we are iterating through
-        memory_buffer = self._memory_buffer.copy()
+        memory_buffer = copy.deepcopy(self._memory_buffer)
         if self._replay_type == 'forward':
             memory_buffer.reverse()
         elif self._replay_type == 'random':
-            random.shuffle(memory_buffer)
+            tmp = list(memory_buffer)
+            random.shuffle(tmp)
+            memory_buffer = deque(tmp, maxlen=self._buffer_size)
 
         # 2) Now we need to iterate until we are under threshold or over the specified number of steps
         replay_steps = 0
@@ -158,13 +159,12 @@ class RLagent:
         # In case of prioritized sweeping, we will update the memory buffer real time
         if self._plotter is not None:
             self._plotter.clear()
-        for replay_step in range(self._buffer_size):
-            event = self._memory_buffer.pop(0)
+        for _ in range(self._buffer_size):
+            event = self._memory_buffer.popleft()
             self.reinforcement_learning(state=event.state, action=event.action, reward=event.reward,
                                                   arrival_state=event.arrival_state)
             if not self._memory_buffer:
                 return
-        return
 
     # Public methods to instruct the agent -----------------------------------------------------------------------------
     def get_pos(self) -> int:
@@ -185,7 +185,7 @@ class RLagent:
         Placeholder for the pre-training of the MB agents
         """
         self.__take_step__(arrival_state=arrival_state)
-        pass
+        return
     
     def action_selection(self, state=None) -> dict:
         """
@@ -255,7 +255,6 @@ class MFagent(RLagent):
         """
         super().__init__(environment=environment, gamma=gamma, epsilon=epsilon, **kwargs)
         self._alpha = alpha
-        return
 
     # The hidden methods necessary for Q-learning ----------------------------------------------------------------------
     def __Q_learning__(self, action: str, arrival_state: int, reward: float, state: int) -> float:
@@ -321,12 +320,8 @@ class MBagent(RLagent):
                                      for state in environment.get_states()}
         self._predecessors = kwargs.get('predecessors', False)
 
-        self._bd_cycles     = kwargs.get('bd_cycles', 10)            
-        self._bd_ts_budget  = kwargs.get('bd_ts_budget', self._buffer_size)
-
         if self._predecessors and self._replay_type != 'prioritized':
             raise ValueError('Predecessor search only makes sense while using prioritized sweeping')
-        return
     
     # Hidden methods unique to the MB agent ----------------------------------------------------------------------------
     def __known_actions__(self, state:int) -> list:
@@ -375,6 +370,7 @@ class MBagent(RLagent):
         for arrival_state in self._Q.keys():
             Q_max = self.__Q_max__(state=arrival_state)['value']
             expected_V += self._transition_function[state][action][arrival_state] * Q_max
+
         self._Q[state][action] = self._reward_fun[state][action] + self._gamma * expected_V
         if self._plotter is not None:
             self._plotter.update_Q_values(state=state, Q_max=self.__Q_max__(state)['value'])
@@ -405,7 +401,7 @@ class MBagent(RLagent):
         if self._plotter is not None:
             self._plotter.clear()
         max_Q_change = 0
-        for step in range(self._buffer_size):
+        for _ in range(self._buffer_size):
             action = self.action_selection(state=state)['action']
             if not action:
                 return
@@ -426,6 +422,7 @@ class MBagent(RLagent):
         :param state: The state the predecessors of which we want to find
         :param priority: The priority of the state that we will back propagate to its predecessors
         """
+
         if abs(priority) < self._replay_threshold:
             return
         # For every possible action ...
@@ -446,7 +443,6 @@ class MBagent(RLagent):
                     self.__store_event__(state=predecessor, action=action,
                                          reward=self._reward_fun[predecessor][action],
                                          arrival_state=state, priority=predecessor_priority)
-        return
 
     # Overwriting some of the paren class's public methods -------------------------------------------------------------
     def pre_train(self, action: str, arrival_state: int, reward: float) -> None:
@@ -502,52 +498,310 @@ class MBagent(RLagent):
         return
 
 
+# DONE: Modify the predecessor search to adapt to the bidirectional search
+# DONE: implment the _softmax_policy method for the MBagent_BD class
+#DONE:  add beta_offline parameter to the constructor of the MBagent_BD class
+# DONE:  add _maxLoops parameter to the constructor of the MBagent_BD class
+# DONE:  add _budget_ps parameter to the constructor of the MBagent_BD class
+# DONE:  add _budget_ts parameter to the constructor of the MBagent_BD class
 
-    def __bidirectional_search__(self):
-        """Alternate Prioritised Sweeping (backward) and Trajectory Sampling
-        (forward) until either ‑
-            * the change in Q‑values falls below the agent's replay threshold, or
-            * the fixed alternation budget (``self._bd_cycles``) is exhausted.
+class MBagent_BD(RLagent):
+    """
+    This is the model-based agent that will use the VI algorithm
+    """
 
-        The routine makes *no* assumptions about the buffer: it re‑uses the
-        already implemented ``__prioritized_sweeping__`` and
-        ``__trajectory_sampling__`` helpers inside ``MBagent``.  Those methods
-        already obey the size/threshold constraints supplied in the constructor,
-        so here we only need to orchestrate the alternation and convergence check.
+    def __init__(self, environment: Environment, gamma=0.9, epsilon=0.05, theta=0.0001, window_length=10,
+                 **kwargs) -> None:
+        """
+        Setting up the MF agent. This agent will also store a model of the environment in the form of a reward- and a
+        transition function. This means that this agent will need a convergence threshold for its calculations (theta)
+        and a window length for updating its model
+        :kwargs predecessors: Should predecessors be added to the prioritized sweeping array?
+        """
+        self._theta = theta
+        self._window_length = window_length
+        super().__init__(environment=environment, gamma=gamma, epsilon=epsilon, **kwargs)
+        self._reward_history = {state: {action: [] for action in environment.get_actions()}
+                                for state in environment.get_states()}
+        self._reward_fun = {state: {action: 0 for action in environment.get_actions()}
+                            for state in environment.get_states()}
+        self._transition_history = {state: {action: []
+                                            for action in environment.get_actions()}
+                                    for state in environment.get_states()}
+        self._transition_function = {state: {action: [1 / len(environment.get_states())] * len(environment.get_states())
+                                             for action in environment.get_actions()}
+                                     for state in environment.get_states()}
+        self._predecessors = kwargs.get('predecessors', False)
+        self._budget_ps = kwargs.get('budget_ps', None) # budget for prioritized sweeping
+        self._budget_ts = kwargs.get('budget_ts', None) # budget for trajectory sampling
+        self._maxLoops = kwargs.get('maxLoops', None) # budget for trajectory sampling
+        self._beta_offline = kwargs.get('beta_offline', None) # budget for trajectory sampling
+        self._beta_online = kwargs.get('beta_online', None) # budget for trajectory sampling
+
+        if self._predecessors and self._replay_type != 'prioritized':
+            raise ValueError('Predecessor search only makes sense while using prioritized sweeping')
+    
+    # Hidden methods unique to the MB agent ----------------------------------------------------------------------------
+    def __known_actions__(self, state:int) -> list:
+        """
+        Returns all the known actions corresponding to a given state (i.e. the actions already taken)
+        """
+        possible_actions = super().__known_actions__(state)
+        known_actions = []
+        for action in possible_actions:
+            cumul_history = [sum(transition) for transition in zip(*self._transition_history[state][action])]
+            if cumul_history and sum(cumul_history) > 0:
+                known_actions.append(action)
+        return known_actions
+    
+    def __update_model__(self, state: int, action: str, arrival_state: int, reward=None) -> None:
+        """
+        Updates the world model based on the experienced transition
+        :param state: The state in which the update takes place
+        :param action: the action taken
+        :param arrival_state: the state the agent arrived in after taking the action
+        :param reward: the reward received over the state transition. If None, we're in pre-training mode and not
+            learning a reward function
+        """
+        if reward is not None:
+            self._reward_history[state][action].append(reward)
+            if len(self._reward_history[state][action]) > self._window_length:
+                self._reward_history[state][action].pop(0)
+            self._reward_fun[state][action] = np.average(self._reward_history[state][action])
+
+        transition = [0] * len(self._Q.keys())
+        transition[arrival_state] = 1
+        self._transition_history[state][action].append(transition)
+        if len(self._transition_history[state][action]) > self._window_length:
+            self._transition_history[state][action].pop(0)
+        self._transition_function[state][action] = \
+            np.sum(np.array(self._transition_history[state][action]), axis=0) / \
+            np.sum(np.array(self._transition_history[state][action]))
+        return
+    
+    def __one_step___value_iteration____(self, state: int, action: str) -> float:
+        """
+        Performs a single step of the value iteration algorithm
+        """
+        Q_t = self._Q[state][action]  # The current Q-value in (s, a)
+        expected_V = 0  # The expected V-function of the arrival state
+        for arrival_state in self._Q.keys():
+            Q_max = self.__Q_max__(state=arrival_state)['value']
+            expected_V += self._transition_function[state][action][arrival_state] * Q_max
+
+        self._Q[state][action] = self._reward_fun[state][action] + self._gamma * expected_V
+        if self._plotter is not None:
+            self._plotter.update_Q_values(state=state, Q_max=self.__Q_max__(state)['value'])
+        return self._Q[state][action] - Q_t
+
+    # Hidden methods related to MB replay ------------------------------------------------------------------------------
+    def __value_iteration__(self) -> float:
+        """
+        The value iteration algorithm
         """
         if self._plotter is not None:
             self._plotter.clear()
+        max_Q_change = self._theta  # The biggest absolute Q-value change we experineced in the WHOLE state space
+        while abs(max_Q_change) >= self._theta:
+            max_Q_change = 0
+            for state in self._Q.keys():
+                for action in self._Q[state].keys():
+                    delta_Q = self.__one_step___value_iteration____(state=state, action=action)
+                    if abs(delta_Q) > abs(max_Q_change):
+                        max_Q_change = delta_Q
+        return max_Q_change
 
-        # Track largest absolute Q‑change we observe across the rounds.
-        max_total_delta: float = float("inf")
-        cycles = 0
+    def __trajectory_sampling__(self, state: int):
+        """
+        The trajectory sampling method of replay
+        :param state: The state in which the trajectories start
+        """
+        if self._plotter is not None:
+            self._plotter.clear()
+        max_Q_change = 0
+        for _ in range(self._buffer_size):
+            action = self.action_selection(state=state)['action']
+            if not action:
+                return
+            arrival_state = int(np.random.choice(list(self._Q.keys()), p=self._transition_function[state][action]))
+            reward = self._reward_fun[state][action]
+            delta_Q = self.reinforcement_learning(state=state, action=action, reward=reward,
+                                                  arrival_state=arrival_state)
+            max_Q_change = max(abs(delta_Q), max_Q_change)
+            if reward > 0:  # If it is the end of a simulated episode
+                if max_Q_change < self._replay_threshold:
+                    return
+                max_Q_change = 0
+            state = arrival_state
 
-        while (abs(max_total_delta) >= (self._replay_threshold or 0)) and (
-            cycles < self._bd_cycles):
-            max_total_delta = 0.0  # reset aggregator for this outer cycle
+    def __predecessor_search__(self, state: int, priority: float):
+        """
+        priority = delta_Q
+        Performs the predecessor search and adds each one to the memeory buffer
+        :param state: The state the predecessors of which we want to find
+        :param priority: The priority of the state that we will back propagate to its predecessors
+        """
+        if abs(priority) < self._replay_threshold:
+            return
+        # For every possible action ...
+        for action in self._Q[state].keys():
+            predecessor_states = list(self._Q.keys())
+            # And every possible (predecessor) state
+            for predecessor in predecessor_states:
+                # We check if there is a realistic chance of a transition taking place from the predecessor,
+                # via the action to the given state
+                cumul_history = [sum(transition) for transition in zip(*self._transition_history[predecessor][action])]
+                if cumul_history and cumul_history[state] > 0 and \
+                   self._transition_function[predecessor][action][state] > 0:
+                    # If there is a possibility that the transition (predecessor, action, state) took place
+                    # 1) We back propagate the priority to the predecessor
+                    predecessor_priority = priority * self._gamma * \
+                                           self._transition_function[predecessor][action][state]
 
-            # ---------- 1) BACKWARD: prioritised sweeping ---------------
-            # Temporarily *cap* the per‑call budget so we do not drain the entire
-            # priority queue at once (the helper consumes until empty).  We do so
-            # by snapshotting the buffer length beforehand.
-            pre_len = len(self._memory_buffer)
-            self.__prioritized_sweeping__()
-            # Estimate how many PS updates ran ≈ elements removed from queue.
-            ps_updates = pre_len - len(self._memory_buffer)
-            max_total_delta = max(max_total_delta, ps_updates)
+                    if abs(predecessor_priority) > self._replay_threshold:
+                        self.__store_event__(state=predecessor, action=action,
+                                         reward=self._reward_fun[predecessor][action],
+                                         arrival_state=state, priority=predecessor_priority)
 
-            # ---------- 2) FORWARD: trajectory sampling -----------------
-            # Temporarily reduce the trajectory budget; save & restore the
-            # original buffer_size so that we don't interfere with other code.
-            orig_buf = self._buffer_size
-            self._buffer_size = self._bd_ts_budget
-            self.__trajectory_sampling__(state=self._current_state)
-            self._buffer_size = orig_buf
-
-            # Re‑use change aggregated by trajectory sampling: it stores max ΔQ
-            # in its local loop and breaks early if below threshold.  We can
-            # conservatively assume one update per TS step.
-            max_total_delta = max(max_total_delta, self._bd_ts_budget)
-
-            cycles += 1
+    # Overwriting some of the paren class's public methods -------------------------------------------------------------
+    def pre_train(self, action: str, arrival_state: int, reward: float) -> None:
+        """
+        Placeholder for the pre-training of the different types of agents
+        """
+        self.__update_model__(state=self._current_state, action=action, arrival_state=arrival_state, reward=None)
+        super().pre_train(action=action, arrival_state=arrival_state, reward=reward)
         return
+
+    def reinforcement_learning(self, action: str, arrival_state: int, reward: float, state=None,
+                               terminated=False) -> float:
+        """
+        The MF agent will simply use Q-learning to update its Q-values
+        :param action: the action taken
+        :param arrival_state: the state the agent arrived in after taking the action
+        :param reward: the reward received over the state transition
+        :param state: if a state is specified, it means I am not learning the current state, ergo it is a replay step
+        :param terminated: is this the end of an episode
+        """
+        curr_state = state
+        # for bidirectional search, we need to use the softmax policy
+        if self._replay_type == 'bidirectional':
+            action = self._softmax_policy(state=self._current_state, beta=self._beta_online)
+
+        if curr_state is None:
+            curr_state = self._current_state
+        super().reinforcement_learning(action=action, arrival_state=arrival_state, reward=reward, state=state,
+                                       terminated=terminated)
+        if state is None:  # Meaning that it is a real step
+            self.__update_model__(state=curr_state, action=action, arrival_state=arrival_state, reward=reward)
+
+
+        # obtain RPE and update the Q-values
+        if self._replay_type is None:
+            delta_Q = self.__value_iteration__()
+        else:
+            delta_Q = self.__one_step___value_iteration____(state=curr_state, action=action)
+
+        # check if we need to store the event in the priority queue
+        if state is None and self._replay_type not in [None, 'trajectory']:
+            self.__store_event__(state=self._current_state, action=action, reward=reward, arrival_state=arrival_state,
+                                 priority=delta_Q)
+        if self._predecessors:
+            self.__predecessor_search__(state=curr_state, priority=delta_Q)
+        return delta_Q
+
+    def memory_replay(self):
+        """
+        This function will add the option of trajectory sampling to the parent class's replay function.
+        """
+        #super().memory_replay()
+        #if self._replay_type == 'trajectory':
+
+        super().memory_replay()
+        if self._replay_type == 'bidirectional':
+            self.__bidirectional_search__()
+        elif self._replay_type == 'trajectory':
+            self.__trajectory_sampling__(self._current_state)
+        return
+
+
+    def _softmax_policy(self, state:int, beta=10):
+
+        if self._beta_offline is not None:
+            beta = self._beta_offline
+         
+        # Q_values
+        all_actions = self._Q[state]
+        exp_Q = [np.exp(beta * self._Q[state][action]) for action in all_actions]
+
+        # softmax probabilities
+        probabilities = {action: exp_Q[i] / sum(exp_Q) for i, action in enumerate(all_actions)}
+
+        # action selection
+        action = np.random.choice(list(probabilities.keys()), p=list(probabilities.values()))
+
+        return action
+
+        
+    def __bidirectional_search__(self):
+
+        '''
+        bidirectional search 
+        
+        prioritized sweeping with predecessors, followed by trajectory sampling
+
+        '''
+
+        nbLoops = 0
+        while nbLoops < self._maxLoops:
+            sum_RPE = 0
+            nbLoops += 1
+            nbPS = 0 # number of prioritized sweeping steps
+
+            # bugeted prioritized sweeping
+            while nbPS < self._budget_ps and self._memory_buffer[0].priority > self._replay_threshold:
+                event = self._memory_buffer[0]
+                state, action  = event.state, event.action
+                arrival_state = np.random.choice(list(self._Q.keys()), p=self._transition_function[state][action])
+                reward = self._reward_fun[state][action]
+
+                # one-step MB update
+                delta_Q = abs(self.__one_step___value_iteration____(state=state, action=action))
+                sum_RPE += delta_Q
+
+                # update the priority
+                self.__store_event__(state=state, action=action, reward=reward, arrival_state=arrival_state,
+                                  priority=delta_Q)
+
+                # prioritized sweeping
+                self.__predecessor_search__(state=state, priority=delta_Q)
+
+            # budgeted trajectory sampling
+            nbTS = 0
+            state_in_buffer = False
+            mental_curr_state = self._current_state
+            while nbTS < self._budget_ts and not state_in_buffer:
+
+                # check if the current_state in real world is in the memory buffer
+                state_in_buffer = any(event.state == mental_curr_state for event in self._memory_buffer)
+
+                # draw action from the softmax policy
+                action = self._softmax_policy(mental_curr_state, beta=self._beta_offline)
+                # draw arrival state from the transition function
+                arrival_state = int(np.random.choice(list(self._Q.keys()), p=self._transition_function[mental_curr_state][action]))
+
+                delta_Q = abs(self.__one_step___value_iteration____(state=mental_curr_state, action=action))
+                sum_RPE += delta_Q
+                mental_curr_state = arrival_state
+
+            if sum_RPE < self._theta:
+                break # break if the sum of RPE is below the threshold
+                
+                
+                
+
+                
+
+                
+
+
+
