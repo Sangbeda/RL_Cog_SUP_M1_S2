@@ -1,6 +1,7 @@
 from environments import *
 import random
 from plotter import *
+from collections import deque
 
 
 class Event:
@@ -48,11 +49,11 @@ class RLagent:
         self._current_state = environment.get_current_state()
 
         # About the replay
-        self._memory_buffer = []
+        self._buffer_size = kwargs.get('max_replay', None)
+        self._memory_buffer = deque(maxlen=self._buffer_size)
         self._replay_type = kwargs.get('replay_type', None)
         if self._replay_type not in [None, 'random', 'forward', 'backward', 'prioritized', 'trajectory', 'bidirectional']:
             raise ValueError(f'{self._replay_type} is not a valid replay type.')
-        self._buffer_size = kwargs.get('max_replay', None)
         self._replay_threshold = kwargs.get('replay_threshold', None)
         if self._replay_type is not None and self._buffer_size is None and self._replay_threshold is None:
             raise ValueError(f'When {self._replay_type}-type replay is used, "max_replay" or "replay_threshold" '
@@ -98,8 +99,7 @@ class RLagent:
         return list(self._Q[state].keys())
     
     # Private methods related to the replay ----------------------------------------------------------------------------
-    def __store_event__(self, state: int, action: str, reward: float, arrival_state: int,
-                        priority: float | None) -> None:
+    def __store_event__(self, state: int, action: str, reward: float, arrival_state: int, priority: float | None) -> None:
         """
         This method will create an Event-type object and either
             - Overwrite an existing memory in the memory buffer; or
@@ -115,16 +115,13 @@ class RLagent:
 
         # 2) Otherwise, if it is not in the buffer, let's add it to the front
         event = Event(state=state, action=action, reward=reward, arrival_state=arrival_state, priority=abs(priority))
-        self._memory_buffer.insert(0, event)
+        self._memory_buffer.appendleft(event)
 
         # 2a) Or if we are prioritized, it will not actually be the front
+        # deque will automatically remove the oldest element if the buffer is full
         if self._replay_type == 'prioritized':
-            self._memory_buffer.sort(reverse=True)
-
-        # 3) Delete the oldest / least important element
-        if len(self._memory_buffer) > self._buffer_size:
-            self._memory_buffer.pop()
-        return
+            sorted_events = sorted(self._memory_buffer, key=lambda e: e.priority, reverse=True)
+            self._memory_buffer = deque(sorted_events, maxlen=self._buffer_size)
 
     def __classical_replay__(self):
         """
