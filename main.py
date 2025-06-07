@@ -69,8 +69,10 @@ def run_in_parallel(exp_params: dict, agent_params: dict, keys: list, nr_of_runs
         for res in results:
             reward_rates[f'{key[0]}_{key[1]}'].append(res[0])
             run_times[f'{key[0]}_{key[1]}'].append(res[1])
+            print(res)
     for key in keys:
-        print(f'Agent {key[0]} {key[1]}: \t\t\t{np.mean(run_times[f"{key[0]}_{key[1]}"])} sec')
+        # print(f'Agent {key[0]} {key[1]}: \t\t\t{np.mean(run_times[f"{key[0]}_{key[1]}"])} sec')
+        pass
     ax = plot_reward_rates(reward_rates)
     ax.axhline(y=10 / 14, linewidth=2, color='0.3', ls='--')
     ax.axhline(y=10 / 16, linewidth=2, color='0.3', ls='--')
@@ -201,15 +203,15 @@ def main():
 
     # Task 5 -----------------------------------------------------------------------------------------------------------
     agents_to_run = [
-        ['MF', 'classic'],
-        ['MB', 'classic'],
-        ['MF', 'prioritized'],
-        ['MB', 'prioritized'],
-        ['MB', 'predecessor'],
+        # ['MF', 'classic'],
+        # ['MB', 'classic'],
+        # ['MF', 'prioritized'],
+        # ['MB', 'prioritized'],
+        # ['MB', 'predecessor'],
         ['MB', 'bidirectional']
     ]
-    run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30)
-    # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MB', 'prioritized'], plot_from=1)
+    # run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30)
+    run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MB', 'bidirectional'], plot_from=1)
     # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MB', 'predecessor'], plot_from=1)
 
     # # Bonus task -------------------------------------------------------------------------------------------------------
