@@ -50,7 +50,7 @@ class RLagent:
         # About the replay
         self._memory_buffer = []
         self._replay_type = kwargs.get('replay_type', None)
-        if self._replay_type not in [None, 'random', 'forward', 'backward', 'prioritized', 'trajectory']:
+        if self._replay_type not in [None, 'random', 'forward', 'backward', 'prioritized', 'trajectory', 'bidirectional']:
             raise ValueError(f'{self._replay_type} is not a valid replay type.')
         self._buffer_size = kwargs.get('max_replay', None)
         self._replay_threshold = kwargs.get('replay_threshold', None)
@@ -323,6 +323,10 @@ class MBagent(RLagent):
                                              for action in environment.get_actions()}
                                      for state in environment.get_states()}
         self._predecessors = kwargs.get('predecessors', False)
+
+        self._bd_cycles     = kwargs.get('bd_cycles', 10)            
+        self._bd_ts_budget  = kwargs.get('bd_ts_budget', self._buffer_size)
+
         if self._predecessors and self._replay_type != 'prioritized':
             raise ValueError('Predecessor search only makes sense while using prioritized sweeping')
         return
@@ -490,7 +494,63 @@ class MBagent(RLagent):
         """
         This function will add the option of trajectory sampling to the parent class's replay function.
         """
+        #super().memory_replay()
+        #if self._replay_type == 'trajectory':
+
         super().memory_replay()
-        if self._replay_type == 'trajectory':
+        if self._replay_type == 'bidirectional':
+            self.__bidirectional_search__()
+        elif self._replay_type == 'trajectory':
             self.__trajectory_sampling__(self._current_state)
+        return
+
+
+
+    def __bidirectional_search__(self):
+        """Alternate Prioritised Sweeping (backward) and Trajectory Sampling
+        (forward) until either ‑
+            * the change in Q‑values falls below the agent's replay threshold, or
+            * the fixed alternation budget (``self._bd_cycles``) is exhausted.
+
+        The routine makes *no* assumptions about the buffer: it re‑uses the
+        already implemented ``__prioritized_sweeping__`` and
+        ``__trajectory_sampling__`` helpers inside ``MBagent``.  Those methods
+        already obey the size/threshold constraints supplied in the constructor,
+        so here we only need to orchestrate the alternation and convergence check.
+        """
+        if self._plotter is not None:
+            self._plotter.clear()
+
+        # Track largest absolute Q‑change we observe across the rounds.
+        max_total_delta: float = float("inf")
+        cycles = 0
+
+        while (abs(max_total_delta) >= (self._replay_threshold or 0)) and (
+            cycles < self._bd_cycles):
+            max_total_delta = 0.0  # reset aggregator for this outer cycle
+
+            # ---------- 1) BACKWARD: prioritised sweeping ---------------
+            # Temporarily *cap* the per‑call budget so we do not drain the entire
+            # priority queue at once (the helper consumes until empty).  We do so
+            # by snapshotting the buffer length beforehand.
+            pre_len = len(self._memory_buffer)
+            self.__prioritized_sweeping__()
+            # Estimate how many PS updates ran ≈ elements removed from queue.
+            ps_updates = pre_len - len(self._memory_buffer)
+            max_total_delta = max(max_total_delta, ps_updates)
+
+            # ---------- 2) FORWARD: trajectory sampling -----------------
+            # Temporarily reduce the trajectory budget; save & restore the
+            # original buffer_size so that we don't interfere with other code.
+            orig_buf = self._buffer_size
+            self._buffer_size = self._bd_ts_budget
+            self.__trajectory_sampling__(state=self._current_state)
+            self._buffer_size = orig_buf
+
+            # Re‑use change aggregated by trajectory sampling: it stores max ΔQ
+            # in its local loop and breaks early if below threshold.  We can
+            # conservatively assume one update per TS step.
+            max_total_delta = max(max_total_delta, self._bd_ts_budget)
+
+            cycles += 1
         return

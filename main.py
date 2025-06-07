@@ -117,6 +117,18 @@ def main():
         'max_replay': 50,  # ------------------------ The number of replay staps allowed
         'replay_threshold': 0.001  # ---------------- The minimum change in Q-values eliciting a replay event
     }
+
+
+    agent_params['MB']['bidirectional'] = {
+        'gamma': 0.9,  # ---------------------------- The discount factor
+        'epsilon': 0.05,  # ------------------------- For the epsilon-greedy action selection
+        'theta': 0.001,  # -------------------------- The threshold of the MB agent
+        'window_length': 10,  # --------------------- The window for the model learning (MB)
+        'replay_type': None,  # --------------------- The type of replay to be used
+        'max_replay': 100,  # ------------------------ The number of replay staps allowed
+        'replay_threshold': 0.0005  # ---------------- The minimum change in Q-values eliciting a replay even 
+    }
+
     agent_params['MB']['random'] = agent_params['MB']['classic'].copy()
     agent_params['MB']['random']['replay_type'] = 'random'
 
@@ -136,49 +148,56 @@ def main():
     agent_params['MB']['trajectory'] = agent_params['MB']['classic'].copy()
     agent_params['MB']['trajectory']['replay_type'] = 'trajectory'
 
+    agent_params['MB']['bidirectional'] = agent_params['MB']['classic'].copy()
+    agent_params['MB']['bidirectional']['replay_type']     = 'bidirectional'
+    
+
+
+
+
     # ------------------------------------------------------------------------------------------------------------------
-    # Task 1 -----------------------------------------------------------------------------------------------------------
-    agents_to_run = [
-        ['MF', 'classic'],
-        ['MB', 'classic']
-    ]
-    run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30)
-    # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MF', 'classic'], plot_from=1)
-    # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MB', 'classic'], plot_from=1)
-
-    # Task 2 -----------------------------------------------------------------------------------------------------------
-    agents_to_run = [
-        ['MF', 'classic'],
-        ['MB', 'classic'],
-        ['MF', 'random'],
-        ['MF', 'forward'],
-        ['MF', 'backward']
-    ]
+    # # Task 1 -----------------------------------------------------------------------------------------------------------
+    # agents_to_run = [
+    #     ['MF', 'classic'],
+    #     ['MB', 'classic']
+    # ]
     # run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30)
-    # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MF', 'random'], plot_from=1)
-    # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MF', 'forward'], plot_from=1)
-    # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MF', 'backward'], plot_from=1)
+    # # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MF', 'classic'], plot_from=1)
+    # # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MB', 'classic'], plot_from=1)
 
-    # Task 3 -----------------------------------------------------------------------------------------------------------
-    agents_to_run = [
-        ['MF', 'classic'],
-        ['MF', 'random'],
-        ['MF', 'forward'],
-        ['MF', 'backward'],
-        ['MF', 'prioritized']
-    ]
-    # run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30)
-    # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MF', 'prioritized'], plot_from=1)
+    # # Task 2 -----------------------------------------------------------------------------------------------------------
+    # agents_to_run = [
+    #     ['MF', 'classic'],
+    #     ['MB', 'classic'],
+    #     ['MF', 'random'],
+    #     ['MF', 'forward'],
+    #     ['MF', 'backward']
+    # ]
+    # # run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30)
+    # # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MF', 'random'], plot_from=1)
+    # # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MF', 'forward'], plot_from=1)
+    # # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MF', 'backward'], plot_from=1)
 
-    # Task 4 -----------------------------------------------------------------------------------------------------------
-    agents_to_run = [
-        ['MB', 'classic'],
-        ['MB', 'random'],
-        ['MB', 'forward'],
-        ['MB', 'backward'],
-        ['MB', 'prioritized']
-    ]
-    # run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30)
+    # # Task 3 -----------------------------------------------------------------------------------------------------------
+    # agents_to_run = [
+    #     ['MF', 'classic'],
+    #     ['MF', 'random'],
+    #     ['MF', 'forward'],
+    #     ['MF', 'backward'],
+    #     ['MF', 'prioritized']
+    # ]
+    # # run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30)
+    # # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MF', 'prioritized'], plot_from=1)
+
+    # # Task 4 -----------------------------------------------------------------------------------------------------------
+    # agents_to_run = [
+    #     ['MB', 'classic'],
+    #     ['MB', 'random'],
+    #     ['MB', 'forward'],
+    #     ['MB', 'backward'],
+    #     ['MB', 'prioritized']
+    # ]
+    # # run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30)
 
     # Task 5 -----------------------------------------------------------------------------------------------------------
     agents_to_run = [
@@ -186,18 +205,19 @@ def main():
         ['MB', 'classic'],
         ['MF', 'prioritized'],
         ['MB', 'prioritized'],
-        ['MB', 'predecessor']
+        ['MB', 'predecessor'],
+        ['MB', 'bidirectional']
     ]
-    # run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30)
+    run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30)
     # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MB', 'prioritized'], plot_from=1)
     # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MB', 'predecessor'], plot_from=1)
 
-    # Bonus task -------------------------------------------------------------------------------------------------------
-    agents_to_run = [
-        ['MB', 'classic'],
-        ['MB', 'forward'],
-        ['MB', 'trajectory']
-    ]
+    # # Bonus task -------------------------------------------------------------------------------------------------------
+    # agents_to_run = [
+    #     ['MB', 'classic'],
+    #     ['MB', 'forward'],
+    #     ['MB', 'trajectory']
+    # ]
     # run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30)
     # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MB', 'forward'], plot_from=20)
     # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MB', 'trajectory'], plot_from=20)
