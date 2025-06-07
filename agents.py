@@ -2,6 +2,7 @@ from environments import *
 import random
 from plotter import *
 from collections import deque
+import copy
 
 
 class Event:
@@ -71,7 +72,6 @@ class RLagent:
         self._current_state = arrival_state
         if self._plotter is not None:
             self._plotter.update_agent_pos(self._current_state)
-        return
 
     def __Q_max__(self, state: int, possible_actions=None) -> dict:
         """
@@ -111,7 +111,6 @@ class RLagent:
             for event in self._memory_buffer:
                 if event.state == state and event.action == action:
                     event.priority = max(event.priority, abs(priority))
-                    return
 
         # 2) Otherwise, if it is not in the buffer, let's add it to the front
         event = Event(state=state, action=action, reward=reward, arrival_state=arrival_state, priority=abs(priority))
@@ -131,11 +130,13 @@ class RLagent:
             self._plotter.clear()
 
         # 1) Prepare the buffer that we are iterating through
-        memory_buffer = self._memory_buffer.copy()
+        memory_buffer = copy.deepcopy(self._memory_buffer)
         if self._replay_type == 'forward':
             memory_buffer.reverse()
         elif self._replay_type == 'random':
-            random.shuffle(memory_buffer)
+            tmp = list(memory_buffer)
+            random.shuffle(tmp)
+            memory_buffer = deque(tmp, maxlen=self._buffer_size)
 
         # 2) Now we need to iterate until we are under threshold or over the specified number of steps
         replay_steps = 0
@@ -159,7 +160,7 @@ class RLagent:
         if self._plotter is not None:
             self._plotter.clear()
         for replay_step in range(self._buffer_size):
-            event = self._memory_buffer.pop(0)
+            event = self._memory_buffer.popleft()
             self.reinforcement_learning(state=event.state, action=event.action, reward=event.reward,
                                                   arrival_state=event.arrival_state)
             if not self._memory_buffer:
