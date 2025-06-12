@@ -3,6 +3,7 @@ import random
 from plotter import *
 from collections import deque
 import copy
+import copy
 
 
 class Event:
@@ -131,12 +132,15 @@ class RLagent:
 
         # 1) Prepare the buffer that we are iterating through
         memory_buffer = copy.deepcopy(self._memory_buffer)
+        memory_buffer = copy.deepcopy(self._memory_buffer)
         if self._replay_type == 'forward':
             memory_buffer.reverse()
         elif self._replay_type == 'random':
             tmp = list(memory_buffer)
+            tmp = list(memory_buffer)
             random.shuffle(tmp)
-            memory_buffer = deque(tmp, maxlen=self._buffer_size)
+            tmp)
+            memory_buffer = deque(tmp, maxlen=self._buffer_size = deque(tmp, maxlen=self._buffer_size)
 
         # 2) Now we need to iterate until we are under threshold or over the specified number of steps
         replay_steps = 0

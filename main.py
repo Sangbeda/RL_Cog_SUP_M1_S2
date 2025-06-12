@@ -99,7 +99,8 @@ def run_in_parallel(exp_params: dict, agent_params: dict, keys: list, nr_of_runs
 
 
     for key in keys:
-        print(f'Agent {key[0]} {key[1]}: \t\t\t{np.mean(run_times[f"{key[0]}_{key[1]}"])} sec')
+        # print(f'Agent {key[0]} {key[1]}: \t\t\t{np.mean(run_times[f"{key[0]}_{key[1]}"])} sec')
+        pass
     ax = plot_reward_rates(reward_rates)
     ax.axhline(y=10 / 14, linewidth=2, color='0.3', ls='--')
     ax.axhline(y=10 / 16, linewidth=2, color='0.3', ls='--')
