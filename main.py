@@ -226,3 +226,14 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+from plotter import MattarDawMazePlot
+
+# After training, you’ll have an agent with Q-table.
+# Initialize the plotter with any valid current_state and the list of max-Q per state:
+init_Q_max_list = [agent._RLagent__Q_max__(s)['value'] for s in agent._Q.keys()]
+maze_plot = MattarDawMazePlot(current_state=agent.get_pos(),
+                              Q_values=init_Q_max_list)
+
+# Now simply call:
+maze_plot.plot_state_value_heatmap()
