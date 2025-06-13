@@ -112,7 +112,7 @@ def run_in_parallel(exp_params: dict, agent_params: dict, keys: list, nr_of_runs
         pass
     ax = plot_reward_rates(reward_rates)
     ax.axhline(y=10 / 14, linewidth=2, color='0.3', ls='--')
-    ax.axhline(y=10 / 16, linewidth=2, color='0.3', ls='--')
+    ax.axhline(y=10/ 11, linewidth=2, color='0.3', ls=':') # optimal reward rate for changed reward location
     plt.show()
 
 def safe_pretrain_run(exp_params, env, agent, threshold, mode):
@@ -298,6 +298,11 @@ def main():
     run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30, mode=mode)
     # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['BD', 'bidirectional'], plot_from=1)
     # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MB', 'predecessor'], plot_from=1)
+    agents_dict = {}
+    {'MB_forward':agent, 'MB_backward':agent,}
+    agents_dict[ key[0] + key[1] ] = agent
+    for agent_name in agents_dict.keys():
+        agents_dict[agent_name]
 
     # # Bonus task -------------------------------------------------------------------------------------------------------
     # agents_to_run = [
