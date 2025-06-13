@@ -63,6 +63,8 @@ class RLagent:
         self._plot_from = kwargs.get('plot_from', None)
         self._episode = 0
         self._plotter = None
+        self._beta_online = kwargs.get('beta_online', 20)  # The beta parameter for the softmax policy
+        self._beta_offline = kwargs.get('beta_offline', 10)  # The beta parameter for the softmax policy
         return
 
     # Private methods --------------------------------------------------------------------------------------------------
@@ -108,7 +110,7 @@ class RLagent:
         If the memory buffer is full, then this function will delete the oldest memory as well
         """
         # 1) In case of prioritized sweeping, we have to occasionally overwrite an element's priority
-        if self._replay_type == 'prioritized':
+        if self._replay_type == 'prioritized' or self._replay_type == 'bidirectional':
             for event in self._memory_buffer:
                 if event.state == state and event.action == action:
                     event.priority = max(event.priority, abs(priority))
@@ -119,7 +121,7 @@ class RLagent:
 
         # 2a) Or if we are prioritized, it will not actually be the front
         # deque will automatically remove the oldest element if the buffer is full
-        if self._replay_type == 'prioritized':
+        if self._replay_type == 'prioritized' or self._replay_type == 'bidirectional':
             sorted_events = sorted(self._memory_buffer, key=lambda e: e.priority, reverse=True)
             self._memory_buffer = deque(sorted_events, maxlen=self._buffer_size)
 
@@ -135,12 +137,12 @@ class RLagent:
         memory_buffer = copy.deepcopy(self._memory_buffer)
         if self._replay_type == 'forward':
             memory_buffer.reverse()
+            memory_buffer = deque(memory_buffer, maxlen=self._buffer_size)
         elif self._replay_type == 'random':
             tmp = list(memory_buffer)
             tmp = list(memory_buffer)
             random.shuffle(tmp)
-            tmp)
-            memory_buffer = deque(tmp, maxlen=self._buffer_size = deque(tmp, maxlen=self._buffer_size)
+            memory_buffer = deque(tmp, maxlen=self._buffer_size)
 
         # 2) Now we need to iterate until we are under threshold or over the specified number of steps
         replay_steps = 0
@@ -161,14 +163,19 @@ class RLagent:
         Implements the prioritized sweeping algorithm
         """
         # In case of prioritized sweeping, we will update the memory buffer real time
-        if self._plotter is not None:
-            self._plotter.clear()
-        for _ in range(self._buffer_size):
-            event = self._memory_buffer.popleft()
-            self.reinforcement_learning(state=event.state, action=event.action, reward=event.reward,
-                                                  arrival_state=event.arrival_state)
-            if not self._memory_buffer:
-                return
+        if self._replay_type != 'bidirectional':
+            delta_Q = 0
+            if self._plotter is not None:
+                self._plotter.clear()
+            for _ in range(self._buffer_size):
+                event = self._memory_buffer.popleft() # no need to remove the event, as it will be remove automatically if exceeds buffer size
+                self.reinforcement_learning(state=event.state, action=event.action, reward=event.reward,
+                                                    arrival_state=event.arrival_state)
+                if not self._memory_buffer:
+                    return delta_Q
+            return delta_Q
+        else:
+            pass # in case of bidirectional replay, placeholder for the bidirectional replay
 
     # Public methods to instruct the agent -----------------------------------------------------------------------------
     def get_pos(self) -> int:
@@ -191,7 +198,7 @@ class RLagent:
         self.__take_step__(arrival_state=arrival_state)
         return
     
-    def action_selection(self, state=None) -> dict:
+    def action_selection(self, state=None, beta=None) -> dict:
         """
         Chooses what action to take based on the state the agent is in
         :param state: the state in which the action needs to be chosen. If None is specified, the current state is used
@@ -204,14 +211,16 @@ class RLagent:
             possible_actions = list(self._Q[state].keys())
         else:
             possible_actions = self.__known_actions__(state=state)
-            if not possible_actions:
+            if not possible_actions and self._replay_type != 'bidirectional':
                 return {}
-        if np.random.uniform(0, 1, 1) <= self._epsilon:
-            random_index = np.random.choice(range(len(possible_actions)))
-            action = possible_actions[random_index]
-            return {'action': action, 'Q-value': self._Q[state][action]}
-        greedy_actions = self.__Q_max__(state=state, possible_actions=possible_actions)['action']
-        action = np.random.choice(greedy_actions)
+        # if np.random.uniform(0, 1, 1) <= self._epsilon:
+        #     random_index = np.random.choice(range(len(possible_actions)))
+        #     action = possible_actions[random_index]
+        #     return {'action': action, 'Q-value': self._Q[state][action]}
+        # greedy_actions = self.__Q_max__(state=state, possible_actions=possible_actions)['action']
+        # action = np.random.choice(greedy_actions)
+        beta = self._beta_online if beta is None else beta
+        action = self._softmax_policy(state=state, beta=beta)
         return {'action': action, 'Q-value': self._Q[state][action]}
 
     def reinforcement_learning(self, action: str, arrival_state: int, reward: float, state=None, terminated=False) -> float:
@@ -247,6 +256,22 @@ class RLagent:
             self.__prioritized_sweeping__()
         return
 
+    def _softmax_policy(self, state:int, beta=10):
+         
+        # Q_values
+        all_actions = list(self._Q[state].keys())
+        Qs = np.array([self._Q[state][action] for action in all_actions])
+        Q_max = np.max(Qs)
+        exp_Q = np.exp(beta * (Qs - Q_max)) # avoid overflow
+        # exp_Q = np.exp(beta * Qs)
+
+        # softmax probabilities
+        probabilities = exp_Q / np.sum(exp_Q)
+
+        # action selection
+        action = np.random.choice(all_actions, p=probabilities)
+
+        return action
 
 class MFagent(RLagent):
     """
@@ -406,7 +431,10 @@ class MBagent(RLagent):
             self._plotter.clear()
         max_Q_change = 0
         for _ in range(self._buffer_size):
-            action = self.action_selection(state=state)['action']
+            if self._replay_type == 'bidirectional':
+                action = self.action_selection(state=state, beta=self._beta_offline)['action']
+            else:
+                action = self.action_selection(state=state, beta=self._beta_online)['action']
             if not action:
                 return
             arrival_state = int(np.random.choice(list(self._Q.keys()), p=self._transition_function[state][action]))
@@ -495,9 +523,7 @@ class MBagent(RLagent):
         #if self._replay_type == 'trajectory':
 
         super().memory_replay()
-        if self._replay_type == 'bidirectional':
-            self.__bidirectional_search__()
-        elif self._replay_type == 'trajectory':
+        if self._replay_type == 'trajectory':
             self.__trajectory_sampling__(self._current_state)
         return
 
@@ -541,8 +567,9 @@ class MBagent_BD(RLagent):
         self._maxLoops = kwargs.get('maxLoops', None) # budget for trajectory sampling
         self._beta_offline = kwargs.get('beta_offline', None) # budget for trajectory sampling
         self._beta_online = kwargs.get('beta_online', None) # budget for trajectory sampling
+        self._replay_state = None # the mode of replay, either 'priotized sweeping' or 'trajectory'
 
-        if self._predecessors and self._replay_type != 'prioritized':
+        if self._predecessors and (self._replay_type not in ['prioritized', 'bidirectional']):
             raise ValueError('Predecessor search only makes sense while using prioritized sweeping')
     
     # Hidden methods unique to the MB agent ----------------------------------------------------------------------------
@@ -623,10 +650,15 @@ class MBagent_BD(RLagent):
         if self._plotter is not None:
             self._plotter.clear()
         max_Q_change = 0
+        delta_Q = 0
+        curr_state = state
         for _ in range(self._buffer_size):
-            action = self.action_selection(state=state)['action']
+            if self._replay_type == 'bidirectional':
+                action = self.action_selection(state=curr_state, beta=self._beta_offline)['action']
+            else:
+                action = self.action_selection(state=curr_state, beta=self._beta_online)['action']
             if not action:
-                return
+                return ( curr_state,delta_Q )
             arrival_state = int(np.random.choice(list(self._Q.keys()), p=self._transition_function[state][action]))
             reward = self._reward_fun[state][action]
             delta_Q = self.reinforcement_learning(state=state, action=action, reward=reward,
@@ -634,9 +666,11 @@ class MBagent_BD(RLagent):
             max_Q_change = max(abs(delta_Q), max_Q_change)
             if reward > 0:  # If it is the end of a simulated episode
                 if max_Q_change < self._replay_threshold:
-                    return
+                    return ( arrival_state, delta_Q )
                 max_Q_change = 0
-            state = arrival_state
+            curr_state = arrival_state
+
+        return (curr_state, delta_Q)
 
     def __predecessor_search__(self, state: int, priority: float):
         """
@@ -672,6 +706,9 @@ class MBagent_BD(RLagent):
         """
         Placeholder for the pre-training of the different types of agents
         """
+        # overwrite the model with softmax policy
+        action = self._softmax_policy(state=self._current_state, beta=self._beta_online)
+        arrival_state = int(np.random.choice(list(self._Q.keys()), p=self._transition_function[self._current_state][action]))
         self.__update_model__(state=self._current_state, action=action, arrival_state=arrival_state, reward=None)
         super().pre_train(action=action, arrival_state=arrival_state, reward=reward)
         return
@@ -687,9 +724,6 @@ class MBagent_BD(RLagent):
         :param terminated: is this the end of an episode
         """
         curr_state = state
-        # for bidirectional search, we need to use the softmax policy
-        if self._replay_type == 'bidirectional':
-            action = self._softmax_policy(state=self._current_state, beta=self._beta_online)
 
         if curr_state is None:
             curr_state = self._current_state
@@ -707,8 +741,9 @@ class MBagent_BD(RLagent):
 
         # check if we need to store the event in the priority queue
         if state is None and self._replay_type not in [None, 'trajectory']:
-            self.__store_event__(state=self._current_state, action=action, reward=reward, arrival_state=arrival_state,
-                                 priority=delta_Q)
+            if self._replay_state == 'prioritized_sweeping':
+                self.__store_event__(state=self._current_state, action=action, reward=reward, arrival_state=arrival_state,
+                                     priority=delta_Q)
         if self._predecessors:
             self.__predecessor_search__(state=curr_state, priority=delta_Q)
         return delta_Q
@@ -726,26 +761,24 @@ class MBagent_BD(RLagent):
         elif self._replay_type == 'trajectory':
             self.__trajectory_sampling__(self._current_state)
         return
-
-
-    def _softmax_policy(self, state:int, beta=10):
-
-        if self._beta_offline is not None:
-            beta = self._beta_offline
-         
-        # Q_values
-        all_actions = self._Q[state]
-        exp_Q = [np.exp(beta * self._Q[state][action]) for action in all_actions]
-
-        # softmax probabilities
-        probabilities = {action: exp_Q[i] / sum(exp_Q) for i, action in enumerate(all_actions)}
-
-        # action selection
-        action = np.random.choice(list(probabilities.keys()), p=list(probabilities.values()))
-
-        return action
-
         
+    def __prioritized_sweeping__(self):
+        """
+        overrides the parent class's method
+        Implements the prioritized sweeping algorithm in bidirectional search
+        """
+        # In case of prioritized sweeping, we will update the memory buffer real time
+        delta_Q = 0
+        if self._plotter is not None:
+            self._plotter.clear()
+        for _ in range(self._buffer_size):
+            event = self._memory_buffer.popleft() # no need to remove the event, as it will be remove automatically if exceeds buffer size
+            delta_Q = self.reinforcement_learning(state=event.state, action=event.action, reward=event.reward,
+                                                  arrival_state=event.arrival_state)
+            if not self._memory_buffer:
+                return delta_Q
+        return delta_Q
+
     def __bidirectional_search__(self):
 
         '''
@@ -762,50 +795,32 @@ class MBagent_BD(RLagent):
             nbPS = 0 # number of prioritized sweeping steps
 
             # bugeted prioritized sweeping
-            while nbPS < self._budget_ps and self._memory_buffer[0].priority > self._replay_threshold:
-                event = self._memory_buffer[0]
-                state, action  = event.state, event.action
-                arrival_state = np.random.choice(list(self._Q.keys()), p=self._transition_function[state][action])
-                reward = self._reward_fun[state][action]
+            while nbPS < self._budget_ps and len(self._memory_buffer) != 0:
 
-                # one-step MB update
-                delta_Q = abs(self.__one_step___value_iteration____(state=state, action=action))
-                sum_RPE += delta_Q
+                if self._memory_buffer[0].priority < self._replay_threshold:
+                    break # break if the priority is below the threshold
 
-                # update the priority
-                self.__store_event__(state=state, action=action, reward=reward, arrival_state=arrival_state,
-                                  priority=delta_Q)
-
-                # prioritized sweeping
-                self.__predecessor_search__(state=state, priority=delta_Q)
+                nbPS += 1
+                self._replay_state = 'prioritized_sweeping'
+                delta_Q = self.__prioritized_sweeping__()
+                sum_RPE += abs(delta_Q)
 
             # budgeted trajectory sampling
             nbTS = 0
             state_in_buffer = False
             mental_curr_state = self._current_state
             while nbTS < self._budget_ts and not state_in_buffer:
-
-                # check if the current_state in real world is in the memory buffer
+                nbTS += 1
+                # check if the current mental state  is in the memory buffer
                 state_in_buffer = any(event.state == mental_curr_state for event in self._memory_buffer)
 
                 # draw action from the softmax policy
-                action = self._softmax_policy(mental_curr_state, beta=self._beta_offline)
-                # draw arrival state from the transition function
-                arrival_state = int(np.random.choice(list(self._Q.keys()), p=self._transition_function[mental_curr_state][action]))
+                self._replay_state = 'trajectory'
+                state, delta_Q = self.__trajectory_sampling__(mental_curr_state)
+                sum_RPE += abs(delta_Q)
+                mental_curr_state = state
 
-                delta_Q = abs(self.__one_step___value_iteration____(state=mental_curr_state, action=action))
-                sum_RPE += delta_Q
-                mental_curr_state = arrival_state
 
             if sum_RPE < self._theta:
                 break # break if the sum of RPE is below the threshold
-                
-                
-                
-
-                
-
-                
-
-
 

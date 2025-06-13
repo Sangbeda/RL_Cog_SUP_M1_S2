@@ -435,3 +435,9 @@ class MattarDawMaze(Environment):
             }
         }
         return
+
+    def _change_reward_location(self): 
+
+        self._transitions[7]['UP'] = {'state': [7], 'proba': [1], 'reward': [0]}
+        self._transitions[45]['RIGHT'] = {'state': [46], 'proba': [1], 'reward': [10]}
+        self._transitions[37]['DOWN'] = {'state': [46], 'proba': [1], 'reward': [10]}

@@ -41,11 +41,20 @@ def pretrain_run(exp_params: dict, environment: Environment, agent: RLagent, rep
     run_time = time.time() - start
     return reward_rate, run_time
 
+def pretrain_run_adaptive(exp_params: dict, environment: Environment, agent: RLagent, replay_threshold=None):
 
-def run_in_parallel(exp_params: dict, agent_params: dict, keys: list, nr_of_runs: int) -> None:
+    run_pre_training(exp_params=exp_params, environment=environment, agent=agent)
+    start = time.time()
+    reward_rate = run_experiment_adaptive(exp_params=exp_params, environment=environment, agent=agent, replay_threshold=replay_threshold)
+    run_time = time.time() - start
+    return reward_rate, run_time
+
+
+def run_in_parallel(exp_params: dict, agent_params: dict, keys: list, nr_of_runs: int, mode='default') -> None:
     """
     Runs nr_of_runs experiments for all agents specified and plots the corresponding reward rates.
     Uses parallel processing to speed it up
+    mode: 'default' for normal run, 'adaptive' for experiments with changing rewards 
     """
     reward_rates = {f'{key[0]}_{key[1]}': [] for key in keys}
     run_times = {f'{key[0]}_{key[1]}': [] for key in keys}
@@ -68,9 +77,9 @@ def run_in_parallel(exp_params: dict, agent_params: dict, keys: list, nr_of_runs
 # ----------------------------------------------------------------------------------------------------------------------
 # alternative parallel execution using multiprocessing ---------------------------------------------------------------
 
-            args = (exp_params, environment, agent, agent_params[key[0]][key[1]]['replay_threshold'])
+            args = (exp_params, environment, agent, agent_params[key[0]][key[1]]['replay_threshold'], mode)
             tasks.append(args)
-        with Pool(processes=min(8, os.cpu_count()//2)) as pool:  # Safer worker count
+        with Pool(processes=8) as pool:  # Safer worker count
             results = []
             # Submit ALL tasks first
             async_results = [
@@ -106,9 +115,12 @@ def run_in_parallel(exp_params: dict, agent_params: dict, keys: list, nr_of_runs
     ax.axhline(y=10 / 16, linewidth=2, color='0.3', ls='--')
     plt.show()
 
-def safe_pretrain_run(exp_params, env, agent, threshold):
+def safe_pretrain_run(exp_params, env, agent, threshold, mode):
     try:
-        return pretrain_run(exp_params, env, agent, threshold)
+        if mode == 'adaptive':
+            return pretrain_run_adaptive(exp_params, env, agent, threshold)
+        else:
+            return pretrain_run(exp_params, env, agent, threshold)
     except Exception as e:
         traceback.print_exc()
         return None
@@ -128,9 +140,11 @@ def create_agent(key, env, agent_params):
 def main():
     # The experiment ---------------------------------------------------------------------------------------------------
     exp_params = {
-        'nr_of_episodes': 50,  # ------------------- How many episodes we want to model
+        'nr_of_episodes': 100,  # ------------------- How many episodes we want to model
         'pre_training_steps': 10000,  # -------------- How many steps of pre-training are preformed before learning
-        'obstruct_corridor': None  # ---------------- Leftover from the previous TP, used for the TolmanMaze environment
+        'obstruct_corridor': None,  # ---------------- Leftover from the previous TP, used for the TolmanMaze environment
+        'max_steps': 10000,  # --------------------- How many steps we allow the agent to take in each episode
+        'abruptive_episode': 50, # ------------------ The episode in which the reward changes abruptly
     }
 
     # The agents -------------------------------------------------------------------------------------------------------
@@ -141,7 +155,7 @@ def main():
         'alpha': 0.3,  # ---------------------------- The learning rate of the MF agent
         'replay_type': None,  # --------------------- The type of replay to be used
         'max_replay': 50,  # ------------------------ The number of replay staps allowed
-        'replay_threshold': 0.001  # ---------------- The minimum change in Q-values eliciting a replay event
+        'replay_threshold': 0.0001  # ---------------- The minimum change in Q-values eliciting a replay event
     }
     agent_params['MF']['random'] = agent_params['MF']['classic'].copy()
     agent_params['MF']['random']['replay_type'] = 'random'
@@ -157,22 +171,24 @@ def main():
 
     agent_params['MB']['classic'] = {
         'gamma': 0.9,  # ---------------------------- The discount factor
-        'epsilon': 0.05,  # ------------------------- For the epsilon-greedy action selection
-        'theta': 0.001,  # -------------------------- The threshold of the MB agent
+        # 'epsilon': 0.05,  # ------------------------- For the epsilon-greedy action selection
+        'theta': 0.1,  # -------------------------- The threshold of the MB agent
         'window_length': 10,  # --------------------- The window for the model learning (MB)
         'replay_type': None,  # --------------------- The type of replay to be used
         'max_replay': 50,  # ------------------------ The number of replay staps allowed
-        'replay_threshold': 0.001  # ---------------- The minimum change in Q-values eliciting a replay event
+        'replay_threshold': 0.0001,  # ---------------- The minimum change in Q-values eliciting a replay event
+        'beta_offline': 10, # offline exploration/exploitation trade-off
+        'beta_online': 20, # online exploration/exploitation trade-off
     }
 
 
     agent_params['BD']['bidirectional'] = {
         'gamma': 0.9,  # ---------------------------- The discount factor
-        'epsilon': 0.05,  # ------------------------- For the epsilon-greedy action selection
+        # 'epsilon': 0.05,  # ------------------------- For the epsilon-greedy action selection
         'theta': 0.1,  # -------------------------- The threshold of the MB agent
         'window_length': 10,  # --------------------- The window for the model learning (MB)
         'replay_type': 'bidirectional',  # --------------------- The type of replay to be used
-        'max_replay': 100,  # ------------------------ The number of replay staps allowed
+        'max_replay': 50,  # ------------------------ The number of replay staps allowed
         'replay_threshold': 0.0001,  # ---------------- The minimum change in Q-values eliciting a replay event
         'maxLoops': 10,  # ------------------ The maximum number of loops to be performed in the bidirectional replay
         'budget_ps': 10, # ------------------- The budget for the predecessor sampling
@@ -180,6 +196,26 @@ def main():
         'beta_offline': 10, # offline exploration/exploitation trade-off
         'beta_online': 20, # online exploration/exploitation trade-off
     }
+
+
+    agent_params['MB']['random'] = agent_params['MB']['classic'].copy()
+    agent_params['MB']['random']['replay_type'] = 'random'
+
+    agent_params['MB']['forward'] = agent_params['MB']['classic'].copy()
+    agent_params['MB']['forward']['replay_type'] = 'forward'
+
+    agent_params['MB']['backward'] = agent_params['MB']['classic'].copy()
+    agent_params['MB']['backward']['replay_type'] = 'backward'
+
+    agent_params['MB']['prioritized'] = agent_params['MB']['classic'].copy()
+    agent_params['MB']['prioritized']['replay_type'] = 'prioritized'
+
+    agent_params['MB']['predecessor'] = agent_params['MB']['classic'].copy()
+    agent_params['MB']['predecessor']['replay_type'] = 'prioritized'
+    agent_params['MB']['predecessor']['predecessors'] = True
+
+    agent_params['MB']['trajectory'] = agent_params['MB']['classic'].copy()
+    agent_params['MB']['trajectory']['replay_type'] = 'trajectory'
 
     agent_params['BD']['random'] = agent_params['MB']['classic'].copy()
     agent_params['BD']['random']['replay_type'] = 'random'
@@ -197,10 +233,8 @@ def main():
     agent_params['BD']['predecessor']['replay_type'] = 'prioritized'
     agent_params['BD']['predecessor']['predecessors'] = True
 
-    agent_params['BD']['trajectory'] = agent_params['MB']['classic'].copy()
-    agent_params['BD']['trajectory']['replay_type'] = None
-
     agent_params['BD']['bidirectional']['replay_type']     = 'bidirectional'
+    agent_params['BD']['bidirectional']['predecessors']     = True
     
 
 
@@ -254,12 +288,14 @@ def main():
     agents_to_run = [
         # ['MF', 'classic'],
         # ['MB', 'classic'],
-        # ['MF', 'prioritized'],
-        # ['MB', 'prioritized'],
-        # ['MB', 'predecessor'],
+        ['MB', 'forward'], 
+        ['MB', 'backward'],
+        ['MB', 'prioritized'],
+        ['MB', 'trajectory'],
         ['BD', 'bidirectional']
     ]
-    run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30)
+    mode = 'adaptive'  # 'default' for normal run, 'adaptive' for experiments with changing rewards
+    run_in_parallel(exp_params=exp_params, agent_params=agent_params, keys=agents_to_run, nr_of_runs=30, mode=mode)
     # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['BD', 'bidirectional'], plot_from=1)
     # run_with_visuals(exp_params=exp_params, agent_params=agent_params, key=['MB', 'predecessor'], plot_from=1)
 
