@@ -110,3 +110,31 @@ class MattarDawMazePlot():
         """
         self._replay = np.copy(self._maze)
         self._replay[self._maze >= 0] = 0
+
+    
+    def plot_state_value_heatmap(self, title: str = "State-Value Heatmap"):
+        """
+        Use the already-built self._Q_max grid and self._maze layout
+        to render a masked heatmap of V(s).
+        """
+        import matplotlib.pyplot as plt
+
+        # Mask out walls
+        mask = np.isnan(self._maze)
+        V_masked = np.ma.array(self._Q_max, mask=mask)
+
+        # New figure (or reuse existing axes if you prefer)
+        fig, ax = plt.subplots(figsize=(5, 5))
+        im = ax.imshow(V_masked, origin='lower',
+                       vmin=np.nanmin(self._Q_max), vmax=np.nanmax(self._Q_max))
+        ax.set_title(title)
+        ax.set_xlabel("X position")
+        ax.set_ylabel("Y position")
+        # Overlay the maze walls lightly
+        ax.imshow(mask, cmap='gray', alpha=0.3, origin='lower')
+        fig.colorbar(im, ax=ax, label="V(s)")
+        plt.show()
+        return ax
+
+
+
